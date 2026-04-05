@@ -167,11 +167,14 @@ def main():
     append_csv(row)
     print(f"Logged: {row['timestamp_mt']} MT | Live: {row['rightnow']} min")
 
-    # Dump full JSON for debugging
-    debug_file = os.path.join(os.path.dirname(__file__), "data", "latest.json")
-    with open(debug_file, "w") as f:
+    # Save full raw JSON response with timestamp for later investigation
+    raw_dir = os.path.join(os.path.dirname(__file__), "data", "raw")
+    os.makedirs(raw_dir, exist_ok=True)
+    now_mt = datetime.now(timezone.utc).astimezone(MT)
+    raw_file = os.path.join(raw_dir, f"{now_mt.strftime('%Y-%m-%d_%H%M')}.json")
+    with open(raw_file, "w") as f:
         json.dump(data, f, indent=2)
-    print(f"Full response saved to {debug_file}")
+    print(f"Raw response saved to {raw_file}")
 
 
 if __name__ == "__main__":

@@ -3,6 +3,7 @@ name: Poll SLC TSA Wait Times
 on:
   schedule:
     # Every 5 minutes from 4:00-6:55am Mountain Time (UTC-6 in April = 10:00-12:55 UTC)
+    # Runs April 6-11 only (gate step handles April 11 special case + post-April 11 cutoff)
     - cron: "*/5 10-12 * * *"
     # Summary notification at 6:35am MT = 12:35 UTC
     - cron: "35 12 * * *"
@@ -34,14 +35,18 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Check if flight day (April 11) and outside early window
+      - name: Check date gate (April 6-11 only, April 11 limited)
         id: gate
         run: |
-          # On April 11, only poll at 10:00, 10:15, 10:30 UTC (4:00, 4:15, 4:30 MT)
           TODAY=$(date -u +'%m-%d')
           HOUR=$(date -u +'%H')
           MIN=$(date -u +'%M')
-          if [ "$TODAY" = "04-11" ]; then
+          # Stop entirely after April 11
+          if [[ "$TODAY" > "04-11" ]]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "Past April 11, skipping"
+          # On April 11, only poll at ~4:00, ~4:15, ~4:30 MT (10:00, 10:15, 10:30 UTC)
+          elif [ "$TODAY" = "04-11" ]; then
             if [ "$HOUR" = "10" ] && ([ "$MIN" -le "05" ] || [ "$MIN" -ge "13" -a "$MIN" -le "17" ] || [ "$MIN" -ge "28" -a "$MIN" -le "32" ]); then
               echo "skip=false" >> "$GITHUB_OUTPUT"
             else
@@ -74,13 +79,26 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Check date gate (stop after April 11)
+        id: gate
+        run: |
+          TODAY=$(date -u +'%m-%d')
+          if [[ "$TODAY" > "04-11" ]]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - uses: actions/checkout@v4
+        if: steps.gate.outputs.skip != 'true'
 
       - uses: actions/setup-python@v5
+        if: steps.gate.outputs.skip != 'true'
         with:
           python-version: "3.12"
 
       - name: Send morning summary
+        if: steps.gate.outputs.skip != 'true'
         env:
           BRRR_SECRET: ${{ secrets.BRRR_SECRET }}
         run: python poll.py --summary
