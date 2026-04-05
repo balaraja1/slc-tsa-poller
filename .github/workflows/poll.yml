@@ -1,0 +1,38 @@
+name: Poll SLC TSA Wait Times
+
+on:
+  schedule:
+    # Every 5 minutes from 4:00am-6:30am Mountain Time (UTC-6 in April = 10:00-12:30 UTC)
+    - cron: "*/5 10-12 * * *"
+  workflow_dispatch: # Manual trigger for testing
+
+jobs:
+  poll:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Poll TSA wait times
+        env:
+          BRRR_SECRET: ${{ secrets.BRRR_SECRET }}
+        run: python poll.py
+
+      - name: Commit data
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "data: poll $(date -u +'%Y-%m-%d %H:%M') UTC"
+            git pull --rebase
+            git push
+          fi
