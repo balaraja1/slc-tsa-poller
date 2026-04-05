@@ -5,6 +5,7 @@ import csv
 import json
 import os
 import sys
+import urllib.error
 import urllib.request
 from datetime import datetime, timezone, timedelta
 
@@ -51,38 +52,6 @@ def extract_row(data):
         "precheck_cp1": precheck.get("Checkpoint 1", ""),
         "precheck_cp2": precheck.get("Checkpoint 2", ""),
     }
-
-
-def send_push(row):
-    if not BRRR_SECRET:
-        print("BRRR_SECRET not set, skipping push notification")
-        return
-
-    msg = (
-        f"SLC TSA @ {row['timestamp_mt']} MT\n"
-        f"Live wait: {row['rightnow']} min ({row['rightnow_description']})\n"
-        f"Avg 4-5am: {row['estimated_4am']}m | 5-6am: {row['estimated_5am']}m\n"
-        f"PreCheck CP1: {row['precheck_cp1']} | CP2: {row['precheck_cp2']}"
-    )
-
-    payload = json.dumps({
-        "title": f"TSA: {row['rightnow']} min",
-        "message": msg,
-        "sound": "default",
-    }).encode()
-
-    url = f"https://api.brrr.now/v1/{BRRR_SECRET}"
-    req = urllib.request.Request(
-        url,
-        data=payload,
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            print(f"Push sent: {resp.status}")
-    except Exception as e:
-        print(f"Push failed: {e}", file=sys.stderr)
 
 
 def append_csv(row):
@@ -144,28 +113,34 @@ def summarize_today():
 
     msg = "\n".join(lines)
     print(msg)
+    send_push_payload(f"SLC TSA: {low}-{peak} min range", msg)
 
+
+def send_push_payload(title, msg):
+    """Send a push notification via brrr.now, trying both auth methods."""
     if not BRRR_SECRET:
         print("BRRR_SECRET not set, skipping push")
         return
 
-    payload = json.dumps({
-        "title": f"SLC TSA: {low}-{peak} min range",
-        "message": msg,
-        "sound": "default",
-    }).encode()
+    payload = json.dumps({"title": title, "message": msg, "sound": "default"}).encode()
 
-    url = f"https://api.brrr.now/v1/{BRRR_SECRET}"
-    req = urllib.request.Request(
-        url, data=payload,
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            print(f"Summary push sent: {resp.status}")
-    except Exception as e:
-        print(f"Push failed: {e}", file=sys.stderr)
+    attempts = [
+        ("https://api.brrr.now/v1/send", {"Content-Type": "application/json", "Authorization": f"Bearer {BRRR_SECRET}"}),
+        (f"https://api.brrr.now/v1/{BRRR_SECRET}", {"Content-Type": "application/json"}),
+    ]
+    for url, headers in attempts:
+        req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                body = resp.read().decode()
+                print(f"Push sent via {url.split('?')[0]}: {resp.status} {body}")
+                return
+        except urllib.error.HTTPError as e:
+            body = e.read().decode() if hasattr(e, 'read') else ''
+            print(f"Push attempt failed: {e.code} {body}", file=sys.stderr)
+        except Exception as e:
+            print(f"Push attempt failed: {e}", file=sys.stderr)
+    print("All push attempts failed", file=sys.stderr)
 
 
 def main():
