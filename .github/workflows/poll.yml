@@ -2,12 +2,24 @@ name: Poll SLC TSA Wait Times
 
 on:
   schedule:
-    # Every 5 minutes from 4:00am-6:30am Mountain Time (UTC-6 in April = 10:00-12:30 UTC)
+    # Every 5 minutes from 4:00-6:55am Mountain Time (UTC-6 in April = 10:00-12:55 UTC)
     - cron: "*/5 10-12 * * *"
-  workflow_dispatch: # Manual trigger for testing
+    # Summary notification at 6:35am MT = 12:35 UTC
+    - cron: "35 12 * * *"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Run mode"
+        required: false
+        default: "poll"
+        type: choice
+        options:
+          - poll
+          - summary
 
 jobs:
   poll:
+    if: github.event.schedule != '35 12 * * *' && (github.event_name != 'workflow_dispatch' || inputs.mode == 'poll')
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -20,8 +32,6 @@ jobs:
           python-version: "3.12"
 
       - name: Poll TSA wait times
-        env:
-          BRRR_SECRET: ${{ secrets.BRRR_SECRET }}
         run: python poll.py
 
       - name: Commit data
@@ -36,3 +46,19 @@ jobs:
             git pull --rebase
             git push
           fi
+
+  summary:
+    if: github.event.schedule == '35 12 * * *' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'summary')
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Send morning summary
+        env:
+          BRRR_SECRET: ${{ secrets.BRRR_SECRET }}
+        run: python poll.py --summary

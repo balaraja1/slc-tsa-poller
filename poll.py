@@ -96,16 +96,95 @@ def append_csv(row):
         writer.writerow(row)
 
 
+def summarize_today():
+    """Read today's CSV rows and send a single summary push."""
+    if not os.path.isfile(CSV_FILE):
+        print("No CSV file found, nothing to summarize")
+        return
+
+    today_mt = datetime.now(timezone.utc).astimezone(MT).strftime("%Y-%m-%d")
+    rows = []
+    with open(CSV_FILE, newline="") as f:
+        for row in csv.DictReader(f):
+            if row["timestamp_mt"].startswith(today_mt):
+                rows.append(row)
+
+    if not rows:
+        print("No data for today yet")
+        return
+
+    waits = [int(r["rightnow"]) for r in rows if r["rightnow"]]
+    peak = max(waits)
+    low = min(waits)
+    avg = sum(waits) / len(waits)
+
+    # Find the row closest to 4:45am
+    target_445 = None
+    for r in rows:
+        t = r["timestamp_mt"]
+        if "04:4" in t or "04:50" in t:
+            target_445 = r
+
+    latest = rows[-1]
+
+    lines = [
+        f"SLC TSA Morning Summary ({today_mt})",
+        f"Samples: {len(rows)} polls, 4:00-6:55am MT",
+        f"",
+        f"Live wait range: {low}-{peak} min (avg {avg:.0f})",
+        f"Latest ({latest['timestamp_mt'].split(' ')[1]}): {latest['rightnow']} min",
+    ]
+    if target_445:
+        lines.append(f"At ~4:45am: {target_445['rightnow']} min")
+    lines += [
+        f"",
+        f"Hourly estimates: 4am={latest['estimated_4am']}m  5am={latest['estimated_5am']}m  6am={latest['estimated_6am']}m",
+        f"PreCheck: CP1={latest['precheck_cp1']}  CP2={latest['precheck_cp2']}",
+    ]
+
+    msg = "\n".join(lines)
+    print(msg)
+
+    if not BRRR_SECRET:
+        print("BRRR_SECRET not set, skipping push")
+        return
+
+    payload = json.dumps({
+        "title": f"SLC TSA: {low}-{peak} min range",
+        "message": msg,
+        "sound": "default",
+    }).encode()
+
+    url = f"https://api.brrr.now/v1/{BRRR_SECRET}"
+    req = urllib.request.Request(
+        url, data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            print(f"Summary push sent: {resp.status}")
+    except Exception as e:
+        print(f"Push failed: {e}", file=sys.stderr)
+
+
 def main():
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--summary", action="store_true", help="Send daily summary instead of polling")
+    args = parser.parse_args()
+
+    if args.summary:
+        summarize_today()
+        return
+
     print(f"Fetching TSA wait times from {API_URL}...")
     data = fetch_waittimes()
     row = extract_row(data)
     append_csv(row)
     print(f"Logged: {row['timestamp_mt']} MT | Live: {row['rightnow']} min")
 
-    send_push(row)
-
-    # Also dump full JSON for debugging on first run
+    # Dump full JSON for debugging
     debug_file = os.path.join(os.path.dirname(__file__), "data", "latest.json")
     with open(debug_file, "w") as f:
         json.dump(data, f, indent=2)
