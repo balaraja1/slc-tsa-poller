@@ -124,16 +124,24 @@ def send_push_payload(title, msg):
 
     payload = json.dumps({"title": title, "message": msg, "sound": "default"}).encode()
 
+    # Browser-like headers to avoid Cloudflare 1010 blocks on CI
+    base_headers = {
+        "Content-Type": "application/json",
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+        "Accept": "application/json, text/plain, */*",
+        "Accept-Language": "en-US,en;q=0.9",
+    }
+
     attempts = [
-        ("https://api.brrr.now/v1/send", {"Content-Type": "application/json", "Authorization": f"Bearer {BRRR_SECRET}"}),
-        (f"https://api.brrr.now/v1/{BRRR_SECRET}", {"Content-Type": "application/json"}),
+        ("https://api.brrr.now/v1/send", {**base_headers, "Authorization": f"Bearer {BRRR_SECRET}"}),
+        (f"https://api.brrr.now/v1/{BRRR_SECRET}", base_headers),
     ]
     for url, headers in attempts:
         req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
         try:
             with urllib.request.urlopen(req, timeout=15) as resp:
                 body = resp.read().decode()
-                print(f"Push sent via {url.split('?')[0]}: {resp.status} {body}")
+                print(f"Push sent: {resp.status} {body}")
                 return
         except urllib.error.HTTPError as e:
             body = e.read().decode() if hasattr(e, 'read') else ''
